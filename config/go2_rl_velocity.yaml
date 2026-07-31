@@ -1,0 +1,77 @@
+# Parameters for the Go2 RL velocity controller.
+#
+# The numbers that define the *policy contract* (observation layout, action scale, PD
+# gains, joint order, command bounds) are NOT here. They live in
+# include/go2_rl_velocity/policy_constants.hpp because they must match the trained
+# checkpoint exactly, and are cross-checked against the ONNX metadata at startup. What is
+# tunable here is deployment behaviour: rates, timeouts, and the operator interface.
+
+/**:
+  ros__parameters:
+    # Empty means the ONNX installed with the package
+    # (share/go2_rl_velocity/config/policy/rugged-v2.onnx).
+    policy_path: ""
+
+    # Inferences run at startup to fault in pages and grow the arena before the robot
+    # moves. Costs a few milliseconds once.
+    warmup_iterations: 200
+
+    # LowCmd publish rate. The policy recomputes at 50 Hz; this timer resends the held
+    # target so the motor boards stay fed. Unitree's own deploy FSM does this at 1 kHz.
+    lowcmd_rate_hz: 500.0
+
+    # LowState older than this is treated as a comms failure -> DAMPING. At the Go2's
+    # ~500 Hz publish rate this is 50 missed frames.
+    lowstate_timeout_s: 0.1
+
+    # /cmd_vel older than this decays the velocity command to zero. Not a fault: losing
+    # the operator's input should stop the robot, not drop it.
+    cmd_vel_timeout_s: 0.5
+
+    # Scripted stand-up: two segments, measured pose -> crouch -> policy default pose.
+    stand_segment_s: 1.0
+
+    # Blend from stand gains (kp 60/80/80) to policy gains (kp 20/20/40) before the
+    # policy engages. Going straight over drops the robot a few centimetres.
+    gain_ramp_s: 0.5
+
+    # Velocity command is pinned to zero for this long after handover, matching
+    # CMD_WARMUP_S in the training repo's sim-to-sim check.
+    command_warmup_s: 0.5
+
+    # Fault if projected gravity z rises above this. Upright is -1.0; -0.6 is about 53
+    # degrees of tilt.
+    tilt_limit: -0.6
+
+    # Consecutive control steps with a clamped joint target before faulting. One clamped
+    # step is a policy pushing into a limit; half a second of them is a fight.
+    joint_clamp_fault_steps: 25
+
+    # Inference budget per step and how many consecutive overruns are a fault. Expect
+    # tens of microseconds on the Orin against a 20 ms period.
+    inference_warn_s: 0.010
+    inference_overrun_fault_steps: 10
+
+    # Time spent limp in DAMPING before dropping back to PASSIVE.
+    damping_settle_s: 1.5
+
+    # true  -> velocity command comes from the remote's sticks
+    # false -> velocity command comes from /cmd_vel
+    use_joystick_command: true
+
+    # Command acceleration limits (m/s^2, m/s^2, rad/s^2), so a flicked stick cannot ask
+    # for a step change in velocity.
+    command_accel_limit: [3.0, 3.0, 6.0]
+
+    # Per-axis joystick sign for [vx from ly, vy from lx, wz from rx]. The remote's
+    # convention is undocumented -- confirm with remote_debug before driving, and flip a
+    # sign here rather than rebuilding.
+    joystick_sign: [1.0, -1.0, -1.0]
+
+    # Log the decoded wireless remote at 4 Hz. Use this to verify the button bit layout
+    # against the physical remote before trusting any transition.
+    remote_debug: false
+
+    # Run the full controller but publish no LowCmd. For bench-testing the pipeline
+    # against a live robot without commanding it.
+    dry_run: false
