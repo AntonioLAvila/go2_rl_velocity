@@ -1,12 +1,15 @@
-# Parameters for the Go2 RL velocity controller.
+# Parameters for the Go2 RUGGED (PD position) RL velocity controller.
 #
 # The numbers that define the *policy contract* (observation layout, action scale, PD
 # gains, joint order, command bounds) are NOT here. They live in
 # include/go2_rl_velocity/policy_constants.hpp because they must match the trained
 # checkpoint exactly, and are cross-checked against the ONNX metadata at startup. What is
 # tunable here is deployment behaviour: rates, timeouts, and the operator interface.
+#
+# Keyed by node name rather than the /** wildcard so this file cannot bleed into the flat
+# controller's node (go2_rl_flat, see go2_rl_flat.yaml), whose parameter set differs.
 
-/**:
+go2_rl_velocity:
   ros__parameters:
     # Empty means the ONNX installed with the package
     # (share/go2_rl_velocity/config/policy/rugged-v2.onnx).
