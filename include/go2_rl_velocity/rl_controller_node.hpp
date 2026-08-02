@@ -56,9 +56,6 @@ private:
     const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
     std::shared_ptr<std_srvs::srv::Trigger::Response> response);
 
-  /// Populate a LowCmd from the FSM's held command, including the joint remap and CRC.
-  void fillLowCmd(unitree_go::msg::LowCmd & cmd) const;
-
   double now() const;
 
   // Configuration.

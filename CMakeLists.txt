@@ -93,6 +93,7 @@ if(node_deps_found)
     src/main.cpp
     src/controller_fsm.cpp
     src/rl_controller_node.cpp
+    src/lowcmd_builder.cpp
   )
   # Modern target linking rather than ament_target_dependencies: the latter uses the
   # plain target_link_libraries signature internally, which cannot be mixed with the
@@ -191,6 +192,14 @@ if(BUILD_TESTING)
     GO2_RL_FLAT_REFERENCE_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/reference/flat_feet_time_25_reference.csv"
     GO2_RL_RUGGED_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/rugged-v2.onnx"
   )
+
+  # Needs unitree_go for the real LowCmd wire type, so it is gated the same way the node
+  # itself is -- skipped where unitree_go is not on the prefix path.
+  if(node_deps_found)
+    ament_add_gtest(test_lowcmd_builder test/test_lowcmd_builder.cpp src/lowcmd_builder.cpp)
+    target_link_libraries(test_lowcmd_builder go2_rl_policy rclcpp::rclcpp
+      ${unitree_go_TARGETS})
+  endif()
 endif()
 
 ament_export_include_directories(include)
