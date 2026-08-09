@@ -111,6 +111,7 @@ if(node_deps_found)
   add_executable(go2_rl_flat_node
     src/flat/main.cpp
     src/flat/flat_controller_node.cpp
+    src/lowcmd_builder.cpp
   )
   target_link_libraries(go2_rl_flat_node PRIVATE
     go2_rl_flat_policy

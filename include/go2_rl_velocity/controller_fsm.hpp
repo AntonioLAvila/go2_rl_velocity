@@ -54,13 +54,13 @@ struct MotorCommand
 
 /// The operator-facing state machine.
 ///
-/// Mirrors the structure of Unitree's own deploy FSM: a scripted stand, a policy state,
-/// and two limp states, with the wireless remote driving transitions.
+/// Mirrors Unitree's own deploy FSM: a scripted stand, a policy state, and two limp
+/// states, with the wireless remote driving transitions.
 ///
-/// step() is called at the policy rate (50 Hz). The command it produces is *held* and
-/// republished by the node at a much higher rate, because the Go2's motor boards need to
-/// be fed continuously while the policy only recomputes every 20 ms. That two-rate split
-/// is exactly what mjlab's decimation models in training, so it is not merely convenient.
+/// step() is called at the policy rate (50 Hz); the node holds and republishes its command
+/// at a much higher rate, because the motor boards need feeding continuously while the
+/// policy recomputes every 20 ms. That split is what mjlab's decimation models in
+/// training, so it is not merely convenient.
 class ControllerFsm
 {
 public:

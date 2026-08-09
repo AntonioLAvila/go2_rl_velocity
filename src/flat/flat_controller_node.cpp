@@ -12,38 +12,11 @@
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
-#include "go2_rl_velocity/crc32.hpp"
 #include "go2_rl_velocity/flat/state_conversion.hpp"
+#include "go2_rl_velocity/lowcmd_builder.hpp"
 
 namespace go2_rl_velocity::flat
 {
-
-namespace
-{
-
-/// LowCmd/LowState carry 20 motor slots; the Go2 uses the first 12. The rest must be
-/// explicitly idled, not just left default-constructed.
-constexpr std::size_t kMotorSlots = 20;
-
-/// Number of 32-bit words the LowCmd checksum covers: the whole message except its own
-/// trailing crc field.
-constexpr std::size_t kLowCmdCrcWords = (sizeof(unitree_go::msg::LowCmd) >> 2) - 1;
-
-// The word-wise CRC is only correct if the generated message is densely packed with the
-// crc as its final word -- which is what makes it byte-identical to the IDL struct the
-// Go2's firmware checksums. With the stock unitree_ros2 messages this is 812 bytes with
-// crc at offset 808. If a future unitree_go changes the layout, fail here rather than
-// silently emitting commands the robot discards.
-static_assert(
-  sizeof(unitree_go::msg::LowCmd) % 4 == 0,
-  "LowCmd is not a whole number of 32-bit words; the Unitree CRC cannot be computed "
-  "over it. Check the unitree_go message definitions.");
-static_assert(
-  offsetof(unitree_go::msg::LowCmd, crc) == kLowCmdCrcWords * 4,
-  "LowCmd.crc is not the final word of the message; the CRC would cover the wrong "
-  "bytes and the Go2 would silently discard every command.");
-
-}  // namespace
 
 ControllerNode::ControllerNode()
 : rclcpp::Node("go2_rl_flat")
@@ -316,53 +289,9 @@ void ControllerNode::onPolicyTimer()
   }
 }
 
-void ControllerNode::fillLowCmd(unitree_go::msg::LowCmd & cmd) const
-{
-  cmd.head[0] = kLowCmdHead0;
-  cmd.head[1] = kLowCmdHead1;
-  cmd.level_flag = kLowCmdLevelFlag;
-  cmd.gpio = 0;
-
-  MotorCommand command;
-  {
-    std::lock_guard<std::mutex> lock(command_mutex_);
-    command = held_command_;
-  }
-
-  const auto target = policyToUnitree(command.joint_target);
-  const auto kp = policyToUnitree(command.kp);
-  const auto kd = policyToUnitree(command.kd);
-  const auto tau = policyToUnitree(command.tau);
-
-  for (std::size_t i = 0; i < kMotorSlots; ++i) {
-    auto & motor = cmd.motor_cmd[i];
-    if (i < static_cast<std::size_t>(kNumJoints)) {
-      motor.mode = kMotorModeServo;
-      motor.q = target[i];
-      motor.kp = kp[i];
-      // The motor board computes kp*(q - q_meas) + kd*(dq - dq_meas) + tau. In RL kp is 0
-      // and dq is 0, so kd contributes exactly -kd * qd -- the passive joint damping the
-      // policy was trained with -- on top of the policy's feed-forward torque.
-      motor.kd = kd[i];
-      motor.tau = tau[i];
-    } else {
-      // Slots 12-19 are unused on the Go2. Leaving them at a non-idle mode with non-zero
-      // gains is how a stray command reaches a motor that is not there.
-      motor.mode = kMotorModeIdle;
-      motor.q = 0.0F;
-      motor.kp = 0.0F;
-      motor.kd = 0.0F;
-      motor.tau = 0.0F;
-    }
-    motor.dq = 0.0F;
-  }
-
-  // The Go2 silently drops any LowCmd with a bad CRC, so this must be last.
-  cmd.crc = crc32Core(&cmd, kLowCmdCrcWords);
-}
-
 void ControllerNode::onPublishTimer()
 {
+  MotorCommand command;
   {
     std::lock_guard<std::mutex> lock(command_mutex_);
     if (!have_command_) {
@@ -370,13 +299,22 @@ void ControllerNode::onPublishTimer()
       // zero target, which the motor boards would accept.
       return;
     }
+    command = held_command_;
   }
   if (dry_run_) {
     return;
   }
 
+  LowCmdJoints joints;
+  joints.q = policyToUnitree(command.joint_target);
+  joints.kp = policyToUnitree(command.kp);
+  // In RL kp is 0 and dq is 0, so kd contributes exactly -kd * qd -- the passive joint
+  // damping the policy was trained with -- on top of its feed-forward torque.
+  joints.kd = policyToUnitree(command.kd);
+  joints.tau = policyToUnitree(command.tau);
+
   unitree_go::msg::LowCmd cmd;
-  fillLowCmd(cmd);
+  fillLowCmd(cmd, joints);
   lowcmd_pub_->publish(cmd);
 }
 

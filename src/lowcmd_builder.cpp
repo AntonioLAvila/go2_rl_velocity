@@ -6,17 +6,9 @@
 #include <cstring>
 
 #include "go2_rl_velocity/crc32.hpp"
-#include "go2_rl_velocity/state_conversion.hpp"
 
 namespace go2_rl_velocity
 {
-
-namespace
-{
-
-/// LowCmd/LowState carry 20 motor slots; the Go2 uses the first 12. The rest must be
-/// explicitly idled, not just left default-constructed.
-constexpr std::size_t kMotorSlots = 20;
 
 // The word-wise CRC is only correct if the generated message is densely packed with the
 // crc as its final word -- which is what makes it byte-identical to the IDL struct the
@@ -32,51 +24,40 @@ static_assert(
   "LowCmd.crc is not the final word of the message; the CRC would cover the wrong "
   "bytes and the Go2 would silently discard every command.");
 
-}  // namespace
-
-void fillLowCmd(unitree_go::msg::LowCmd & cmd, const MotorCommand & command)
+void fillLowCmd(unitree_go::msg::LowCmd & cmd, const LowCmdJoints & joints)
 {
-  // LowCmd_'s constructor zeros every *named* field individually (std::fill / direct
-  // assignment) but never touches the compiler-inserted padding between them (e.g. 3
-  // bytes after MotorCmd::mode, before the next 4-byte-aligned float). crc32Core below
-  // reads raw struct memory, padding included, so uninitialised padding silently
-  // corrupts the CRC we compute -- the message still looks entirely correct field by
-  // field, and the Go2 discards it without a trace. Unitree's own get_crc() sidesteps
-  // this by rebuilding into a fresh value-initialised struct before checksumming;
-  // zeroing here first gets the same guarantee without a second struct type. LowCmd_ has
-  // no virtual members and every field is a fixed-size array of a trivial type, so this
-  // is well-defined; routed through void* to sidestep -Wclass-memaccess, which flags any
-  // memset on a type with a user-provided constructor regardless of whether it is
-  // actually unsafe.
+  // LowCmd_'s constructor zeros every *named* field but never the compiler-inserted
+  // padding between them. crc32Core below reads raw struct memory, padding included, so
+  // uninitialised padding silently corrupts the CRC -- the message still looks correct
+  // field by field, and the Go2 discards it without a trace. Routed through void* to
+  // sidestep -Wclass-memaccess; LowCmd_ has no virtual members and every field is a
+  // fixed-size array of a trivial type, so this is well-defined.
   void * raw_cmd = &cmd;
   std::memset(raw_cmd, 0, sizeof(cmd));
 
-  cmd.head[0] = policy::kLowCmdHead0;
-  cmd.head[1] = policy::kLowCmdHead1;
-  cmd.level_flag = policy::kLowCmdLevelFlag;
+  cmd.head[0] = kLowCmdHead0;
+  cmd.head[1] = kLowCmdHead1;
+  cmd.level_flag = kLowCmdLevelFlag;
   cmd.gpio = 0;
-
-  const auto target = policyToUnitree(command.joint_target);
-  const auto kp = policyToUnitree(command.kp);
-  const auto kd = policyToUnitree(command.kd);
 
   for (std::size_t i = 0; i < kMotorSlots; ++i) {
     auto & motor = cmd.motor_cmd[i];
-    motor.mode = policy::kMotorModeServo;
-    if (i < static_cast<std::size_t>(policy::kNumJoints)) {
-      motor.q = target[i];
+    motor.mode = kMotorModeServo;
+    if (i < kGo2Joints) {
+      motor.q = joints.q[i];
       motor.dq = 0.0F;
-      motor.kp = kp[i];
-      motor.kd = kd[i];
+      motor.kp = joints.kp[i];
+      motor.kd = joints.kd[i];
+      motor.tau = joints.tau[i];
     } else {
       // Slots 12-19 are unused on the Go2. Zero gains keep a stray command from reaching
       // a motor that is not there; mode must still be servo (see kPosStopF/kVelStopF).
-      motor.q = policy::kPosStopF;
-      motor.dq = policy::kVelStopF;
+      motor.q = kPosStopF;
+      motor.dq = kVelStopF;
       motor.kp = 0.0F;
       motor.kd = 0.0F;
+      motor.tau = 0.0F;
     }
-    motor.tau = 0.0F;
   }
 
   // The Go2 silently drops any LowCmd with a bad CRC, so this must be last.

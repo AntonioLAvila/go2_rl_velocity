@@ -272,8 +272,14 @@ void RlControllerNode::onPublishTimer()
     return;
   }
 
+  LowCmdJoints joints;
+  joints.q = policyToUnitree(command.joint_target);
+  joints.kp = policyToUnitree(command.kp);
+  joints.kd = policyToUnitree(command.kd);
+  // tau stays zero: this policy drives entirely through the motor boards' PD loop.
+
   unitree_go::msg::LowCmd cmd;
-  fillLowCmd(cmd, command);
+  fillLowCmd(cmd, joints);
   lowcmd_pub_->publish(cmd);
 }
 

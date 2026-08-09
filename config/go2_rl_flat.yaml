@@ -1,15 +1,11 @@
 # Parameters for the Go2 FLAT-GROUND (torque) RL velocity controller.
 #
-# The sibling of go2_rl_velocity.yaml, which configures the rugged position controller.
-# Keyed by node name rather than the /** wildcard so the two files cannot bleed into each
-# other's node if one is passed to the wrong launch file.
+# Keyed by node name, not the /** wildcard, so passing this to the wrong launch file does
+# nothing rather than something subtle.
 #
-# The numbers that define the *policy contract* (observation layout, torque scale, joint
-# order, command bounds, control rate) are NOT here. They live in
-# include/go2_rl_velocity/flat/policy_constants.hpp because they must match the trained
-# checkpoint exactly. Note that unlike the rugged controller they are NOT cross-checked
-# against ONNX metadata at startup -- flat exports carry none -- so test_flat_policy_parity
-# is the only thing guarding them.
+# Policy-contract numbers (observation layout, torque scale, joint order, command bounds,
+# control rate) are NOT here -- see flat/policy_constants.hpp. Flat exports carry no ONNX
+# metadata, so test_flat_policy_parity is the only thing guarding them.
 
 go2_rl_flat:
   ros__parameters:
@@ -22,8 +18,8 @@ go2_rl_flat:
     warmup_iterations: 200
 
     # LowCmd publish rate. The policy recomputes at 200 Hz; this timer resends the held
-    # command so the motor boards stay fed. Republishing a held torque between policy
-    # ticks is the same zero-order hold mjlab's decimation applies in training.
+    # command so the motor boards stay fed -- the same zero-order hold mjlab's decimation
+    # applies in training.
     lowcmd_rate_hz: 500.0
 
     # LowState older than this is treated as a comms failure -> DAMPING. Half the rugged
@@ -32,9 +28,8 @@ go2_rl_flat:
     lowstate_timeout_s: 0.05
 
     # /cmd_vel older than this decays the velocity command to zero. Not a fault: losing
-    # the operator's input should stop the robot, not drop it. Note the flat task sampled
-    # no standing-still commands in training, so zero command is comparatively out of
-    # distribution -- expect foot shuffle rather than stillness.
+    # the operator's input should stop the robot, not drop it. The flat task never sampled
+    # a standing-still command, so expect foot shuffle at zero rather than stillness.
     cmd_vel_timeout_s: 0.5
 
     # Scripted stand-up: two segments, measured pose -> crouch -> policy default pose.
@@ -54,25 +49,21 @@ go2_rl_flat:
 
     # Global derate on the policy's torque. 1.0 is the trained authority.
     #
-    # This exists because the flat policy has never seen actuator uncertainty: mjlab's
-    # dr.pd_gains and dr.effort_limits both raise TypeError on a torque <motor>, so the
-    # task cannot randomize motor strength at all. Torque constant, thermal derating and
-    # gearbox efficiency are exactly what you cannot trust on real hardware. Bring the
-    # robot up hoisted at 0.3 before trusting 1.0.
+    # The flat task cannot randomize motor strength at all (mjlab's dr.pd_gains and
+    # dr.effort_limits both raise on a torque <motor>), so the policy has never seen the
+    # actuator uncertainty you cannot trust on hardware. Bring up hoisted at 0.3.
     torque_scale: 1.0
 
     # kd held in the RL state, with dq_des = 0, so the motor board adds -kd*qd on top of
     # the policy's feed-forward torque.
     #
-    # 2.0 is GO2_ACTUATORS[*].damping: the passive viscous damping every joint carried in
-    # training and the real Go2 does not have. A torque policy has no PD loop to hide
-    # behind, so this is not a tuning knob -- it is part of the plant the policy expects.
-    # Change it only with evidence from the bench, and expect a startup warning if you do.
+    # 2.0 is GO2_ACTUATORS[*].damping: passive viscous damping every joint carried in
+    # training and the real Go2 does not have. Part of the plant the policy expects, not a
+    # tuning knob -- changing it warns at startup.
     passive_damping_kd: 2.0
 
     # Fault if projected gravity z rises above this. Upright is -1.0; -0.7071 is 45
-    # degrees, which is where the flat task terminated the episode in training. The
-    # policy has no experience past this angle.
+    # degrees, where the flat task terminated in training. No experience past this angle.
     tilt_limit: -0.7071
 
     # Consecutive control steps with a saturated torque before faulting. One saturated
@@ -80,9 +71,8 @@ go2_rl_flat:
     torque_saturation_fault_steps: 25
 
     # Consecutive control steps with a joint outside mjlab's soft limit band (0.95 of the
-    # mechanical range about its midpoint) before faulting. A torque policy has no
-    # position target to clamp, so this is the replacement for the rugged controller's
-    # joint_clamp_fault_steps.
+    # mechanical range about its midpoint) before faulting. A torque policy has no position
+    # target to clamp, so excursion is detected after the fact rather than prevented.
     joint_excursion_fault_steps: 10
 
     # Inference budget per step and how many consecutive overruns are a fault. Expect
@@ -102,12 +92,12 @@ go2_rl_flat:
     command_accel_limit: [3.0, 3.0, 6.0]
 
     # Per-axis joystick sign for [vx from ly, vy from lx, wz from rx]. The remote's
-    # convention is undocumented -- confirm with remote_debug before driving, and flip a
-    # sign here rather than rebuilding.
+    # convention is undocumented -- confirm with remote_debug, and flip a sign here
+    # rather than rebuilding.
     joystick_sign: [1.0, -1.0, -1.0]
 
-    # Log the decoded wireless remote at 4 Hz. Use this to verify the button bit layout
-    # against the physical remote before trusting any transition.
+    # Log the decoded wireless remote at 4 Hz, to verify the button bit layout against the
+    # physical remote before trusting any transition.
     remote_debug: false
 
     # Run the full controller but publish no LowCmd. For bench-testing the pipeline
