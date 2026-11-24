@@ -78,7 +78,7 @@ inline constexpr int termFrameOffset(std::size_t term_index)
 inline constexpr double kControlDt = 0.02;
 
 /// Joint order the policy was trained in: FL, FR, RL, RR x hip, thigh, calf.
-/// go2/constants.py:26,50,57. Also embedded in the ONNX metadata.
+/// go2/constants.py:32,59,66. Also embedded in the ONNX metadata.
 inline constexpr std::array<std::string_view, kNumJoints> kJointNames{{
   "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
   "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
@@ -101,7 +101,7 @@ inline constexpr std::array<int, kNumJoints> kPolicyToUnitree{{
   6, 7, 8,      // RR -> Unitree RR
 }};
 
-/// Home keyframe pose, per leg [hip=0, thigh=0.9, calf=-1.8]. go2/constants.py:53.
+/// Home keyframe pose, per leg [hip=0, thigh=0.9, calf=-1.8]. go2/constants.py:62.
 /// joint_pos observations are relative to this, and position targets are offset from it.
 inline constexpr std::array<double, kNumJoints> kDefaultJointPos{{
   0.0, 0.9, -1.8, 0.0, 0.9, -1.8, 0.0, 0.9, -1.8, 0.0, 0.9, -1.8,
@@ -117,7 +117,7 @@ inline constexpr std::array<double, kNumJoints> kActionScale{{
   0.29375, 0.29375, 0.28125, 0.29375, 0.29375, 0.28125,
 }};
 
-/// PD gains the policy was trained against (go2/constants.py:101-111). These go straight
+/// PD gains the policy was trained against (go2/constants.py:117-127). These go straight
 /// into MotorCmd.kp/.kd -- the motor boards close the loop, we never compute torque.
 inline constexpr std::array<double, kNumJoints> kPolicyKp{{
   20.0, 20.0, 40.0, 20.0, 20.0, 40.0, 20.0, 20.0, 40.0, 20.0, 20.0, 40.0,
@@ -156,12 +156,29 @@ inline constexpr std::array<double, kNumJoints> kJointPosUpper{{
   1.0472, 4.5379, -0.83776, 1.0472, 4.5379, -0.83776,
 }};
 
-/// Velocity command envelope (vx m/s, vy m/s, wz rad/s). go2/rugged/constants.py:162.
+/// The training run every number in this file was last checked against. It is also the
+/// ONNX metadata's `run_path`, which is how the node tells whether the checkpoint it was
+/// handed is the one this header describes -- see the command envelope below for why that
+/// matters.
+inline constexpr std::string_view kTrainedRunPath{"2026-11-13_14-08-41_rugged_3ms"};
+
+/// Velocity command envelope (vx m/s, vy m/s, wz rad/s), as [lower, upper] per axis.
+/// go2/rugged/constants.py:143-178 -- REVERSE_SPEED, TOP_SPEED, LIN_VEL_Y, ANG_VEL_Z.
 ///
-/// The checkpoint was trained with a 2.5 m/s ceiling that the repo subsequently measured
-/// as counterproductive (tracking 0.98 -> 0.71, terrain progress stalled, falls doubled)
-/// and capped to 2.0. Treat 2.0 as the hard limit.
-inline constexpr std::array<double, 3> kCommandBounds{{2.0, 1.0, 1.5}};
+/// ASYMMETRIC in vx: the policy runs forward at up to 3.0 m/s but was only ever asked to
+/// back up at 1.0. The forward limit is the last stage of the training ladder
+/// (1.5 -> 2.5 -> 3.0, reached at iteration 2000 of 6000), so the checkpoint spent two
+/// thirds of training with the whole range open.
+///
+/// THE ONE PART OF THE CONTRACT NOTHING CHECKS AT STARTUP. mjlab's exporter writes joint
+/// order, gains, default pose, action scale and term names into the ONNX metadata, and
+/// PolicyRunner validates all of them -- but not the command ranges. A checkpoint with a
+/// different envelope loads cleanly and is then driven outside what it trained on. The
+/// reference trace pins both corners of the envelope (test_policy_parity,
+/// CommandEnvelopeMatchesTrace), and the node warns when `run_path` is not
+/// kTrainedRunPath.
+inline constexpr std::array<double, 3> kCommandLower{{-1.0, -0.5, -1.0}};
+inline constexpr std::array<double, 3> kCommandUpper{{3.0, 0.5, 1.0}};
 
 /// Unitree MotorCmd.mode for servo (position/velocity/torque) control on the Go2.
 inline constexpr std::uint8_t kMotorModeServo = 0x01;

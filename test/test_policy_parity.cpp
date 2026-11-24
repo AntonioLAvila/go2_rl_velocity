@@ -14,10 +14,12 @@
 //   * the last_action off-by-one
 //   * action -> position target
 //   * that policy_constants.hpp still agrees with the trained checkpoint
+//   * the velocity command envelope, which the ONNX metadata does not carry
 //
 // Expected values come from scripts/gen_reference_trace.py, which uses the training
 // repo's own observation packer. See that file for why they are not written by hand.
 
+#include <algorithm>
 #include <array>
 #include <fstream>
 #include <sstream>
@@ -288,6 +290,49 @@ TEST(PolicyParityDiscrimination, FlippedGravitySignDoesNotMatch)
   ObservationBuilder builder;
   builder.reset(frame);
   EXPECT_NE(builder.pack(), row.obs) << "gravity sign convention is unconstrained";
+}
+
+// The command envelope is the one contract value absent from the ONNX metadata, so the
+// trace carries it instead: the generator reads the range out of the checkpoint's frozen
+// params/env.yaml, samples every command inside it, and pins one row to each exact
+// corner. The trace's componentwise extremes are therefore the trained envelope, and the
+// constants have to equal them -- a retrain that moved the range fails here once the
+// trace is regenerated, rather than driving the robot outside what it trained on.
+TEST(PolicyContract, CommandEnvelopeMatchesTrace)
+{
+  const auto rows = loadTrace(GO2_RL_REFERENCE_CSV);
+  ASSERT_GE(rows.size(), 3u);
+
+  std::array<float, 3> lowest = rows.front().command;
+  std::array<float, 3> highest = rows.front().command;
+  for (const auto & row : rows) {
+    for (int axis = 0; axis < 3; ++axis) {
+      lowest[axis] = std::min(lowest[axis], row.command[axis]);
+      highest[axis] = std::max(highest[axis], row.command[axis]);
+    }
+  }
+  for (int axis = 0; axis < 3; ++axis) {
+    EXPECT_FLOAT_EQ(lowest[axis], static_cast<float>(policy::kCommandLower[axis]))
+      << "kCommandLower is not the trained envelope on axis " << axis;
+    EXPECT_FLOAT_EQ(highest[axis], static_cast<float>(policy::kCommandUpper[axis]))
+      << "kCommandUpper is not the trained envelope on axis " << axis;
+  }
+
+  // And the controller's own clamp must be a no-op on everything the policy trained on.
+  for (const auto & row : rows) {
+    for (int axis = 0; axis < 3; ++axis) {
+      ASSERT_EQ(go2_rl_velocity::clampCommand(row.command[axis], axis), row.command[axis])
+        << "an in-distribution command was clamped at step " << row.step;
+    }
+  }
+}
+
+// The node warns when the loaded checkpoint is not the run the envelope was mirrored
+// from; that is only useful if the constant names the checkpoint that actually ships.
+TEST(PolicyContract, TrainedRunPathNamesTheShippedCheckpoint)
+{
+  PolicyRunner runner(GO2_RL_POLICY_ONNX, 1);
+  EXPECT_EQ(runner.run_path(), std::string(policy::kTrainedRunPath));
 }
 
 // A policy trained against different constants must not load at all.

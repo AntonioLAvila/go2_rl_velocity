@@ -20,11 +20,11 @@ command, which is what makes them deployable without an elevation map. That repo
 | control | PD position, motor boards close the loop | **direct torque** |
 | rate | 50 Hz (`0.005 x 4`) | **200 Hz (`0.0025 x 2`)** |
 | observation | 225 = 45 x 5, term-major history | **45, single frame** |
-| commands | `vx +/-2.0`, `vy +/-1.0`, `wz +/-1.5` | **`+/-1.5`, `+/-0.8`, `+/-1.2`** |
+| commands | `vx -1.0..+3.0`, `vy +/-0.5`, `wz +/-1.0` | **`+/-1.5`, `+/-0.8`, `+/-1.2`** |
 | tilt limit | `gravity.z > -0.6` (53 deg) | **`> -0.7071` (45 deg)** |
-| ONNX metadata | full, validated at startup | **absent — shape check only** |
-| checkpoint | `config/policy/rugged-v2.onnx` | `config/policy/flat-feet-time-25.onnx` |
-| from | `logs/rsl_rl/go2_rugged/2026-07-30_10-38-23_rugged-v2/` | `logs/rsl_rl/go2_velocity/feet-time-25/` |
+| ONNX metadata | validated at startup (all but the command envelope) | **absent — shape check only** |
+| checkpoint | `config/policy/latest.onnx` | `config/policy/flat-feet-time-25.onnx` |
+| from | `logs/rsl_rl/go2_rugged/2026-11-13_14-08-41_rugged_3ms/` | `logs/rsl_rl/go2_velocity/feet-time-25/` |
 | namespace | `go2_rl_velocity::policy` | `go2_rl_velocity::flat` |
 | library | `go2_rl_policy` | `go2_rl_flat_policy` |
 | node / executable | `go2_rl_velocity` / `go2_rl_velocity_node` | `go2_rl_flat` / `go2_rl_flat_node` |
@@ -106,9 +106,22 @@ with `kp = {20,20,40}x4`, `kd = {1,1,2}x4`. The motor boards close the PD loop; 
 package never computes torque. Use `0.29375 / 0.28125` from source — the ONNX metadata
 rounds action scale to 3 decimals.
 
-**Command envelope:** `vx ±2.0 m/s`, `vy ±1.0`, `wz ±1.5 rad/s`. The checkpoint trained
-against a 2.5 m/s ceiling that the training repo later measured as counterproductive and
-capped; 2.0 is the real limit.
+**Command envelope:** `vx −1.0…+3.0 m/s`, `vy ±0.5`, `wz ±1.0 rad/s` — `kCommandLower` /
+`kCommandUpper`. **Asymmetric in vx**: 3.0 forward is the last stage of the training ladder
+(1.5 → 2.5 → 3.0, open from iteration 2000 of 6000), reverse was only ever 1.0. So the
+stick has a different gain each side of centre (`stickToCommand`) and `/cmd_vel` is clamped
+per side (`clampCommand`); a symmetric `±bound` clamp would ask for 3× the trained reverse
+speed.
+
+**The envelope is the one contract value nothing validates at startup.** mjlab's exporter
+does not write command ranges into the ONNX metadata, so a checkpoint with a different
+envelope loads cleanly — the previous rugged checkpoint (`±2.0 / ±1.0 / ±1.5`) and this
+one are indistinguishable to `PolicyRunner`. Two things stand in: the reference trace carries both
+corners of the envelope, read from the run's frozen `params/env.yaml`, and
+`PolicyContract.CommandEnvelopeMatchesTrace` requires the constants to equal them; and the
+node warns when the ONNX's `run_path` is not `kTrainedRunPath`. Take the range from
+`env.yaml`'s **last reached `command_vel` curriculum stage**, not from
+`commands.twist.ranges`, which is only where the ladder starts.
 
 ## The flat contract
 
@@ -146,22 +159,38 @@ no command curriculum.
 
 ## After any retrain
 
-1. Copy the new ONNX to `config/policy/`.
+1. Copy the new ONNX to `config/policy/` — rugged as `latest.onnx`, which is what the node
+   loads by default and what the tests replay. There is one rugged checkpoint at a time;
+   `policy_constants.hpp` can only describe one.
 2. Re-check the matching `policy_constants.hpp` against the training repo — rugged against
    `go2/rugged/constants.py`, flat against `go2/constants.py` plus `go2/flat/env_cfg.py`
-   (there is no `go2/flat/constants.py`).
-3. **Regenerate the reference trace** — the tests are meaningless against a stale one:
+   (there is no `go2/flat/constants.py`). For rugged, set `kTrainedRunPath` to the new run
+   and `kCommandLower`/`kCommandUpper` to the envelope the generator prints in step 3.
+3. **Regenerate the reference trace** — the tests are meaningless against a stale one. The
+   generators need the training repo's full uv-managed `.venv` (they import its
+   `check_obs_layout.py`, which pulls in torch and mjlab), so run them where the repo is:
    ```bash
-   /home/antonio/python_venvs/general/bin/python scripts/gen_reference_trace.py \
-     --repo /home/antonio/GitHub/quadruped_walking
-   /home/antonio/python_venvs/general/bin/python scripts/gen_flat_reference_trace.py \
-     --repo /home/antonio/GitHub/quadruped_walking --run-dir <new run dir>
+   REPO=/home/antonio/GitHub/quadruped_walking
+   $REPO/.venv/bin/python $REPO/scripts/check_obs_layout.py      # packer still matches mjlab?
+   $REPO/.venv/bin/python scripts/gen_reference_trace.py --repo $REPO
+   $REPO/.venv/bin/python scripts/gen_flat_reference_trace.py \
+     --repo $REPO --run-dir <new run dir>
    ```
-   The flat generator asserts the layout against the checkpoint's own frozen
-   `params/env.yaml`, not against training HEAD, so point `--run-dir` at the run the ONNX
-   came from.
+   When the repo is on another machine (`ssh pc`) rather than next to this package, copy
+   the generator and the ONNX over and name the paths explicitly:
+   ```bash
+   ssh pc mkdir -p /tmp/trace
+   scp scripts/gen_reference_trace.py config/policy/latest.onnx pc:/tmp/trace/
+   ssh pc 'R=~/GitHub/quadruped_walking; cd /tmp/trace && $R/.venv/bin/python \
+     gen_reference_trace.py --repo $R --onnx latest.onnx --out latest_reference.csv'
+   scp pc:/tmp/trace/latest_reference.csv test/reference/
+   ```
+   Both generators assert against the checkpoint's own frozen `params/env.yaml`, not
+   against training HEAD. The rugged one finds the run from the ONNX's `run_path` metadata
+   (override with `--run-dir`); the flat ONNX has no metadata, so `--run-dir` is required.
 4. `colcon test`. For rugged, a changed `HISTORY_LENGTH` also shows up as a startup
-   contract error. **For flat there is no such backstop** — the trace is the only guard.
+   contract error, and a changed command envelope fails `CommandEnvelopeMatchesTrace`.
+   **For flat there is no such backstop** — the trace is the only guard.
 
 ## Testing strategy
 
@@ -173,7 +202,12 @@ There is no simulation backend here (by design — the training repo's
   (`scripts/check_obs_layout.py::HistoryPacker`, asserted against the live mjlab env at
   `atol=0`) and from the ONNX itself. Covers layout, history direction, backfill, the
   joint remap in both directions, the gravity sign convention, the `last_action`
-  off-by-one, and action→target.
+  off-by-one, and action→target. Its `PolicyContract` suite also pins the command
+  envelope to the trace and `kTrainedRunPath` to the shipped ONNX.
+- **`test_command_envelope`** — the rugged command shaping, which lives in
+  `state_conversion.hpp` rather than the FSM precisely so it is testable without
+  `unitree_go`: per-side stick gain, per-side clamp, saturation past full deflection, and
+  non-finite input meaning stop.
 - **`PolicyParityDiscrimination`** — proves the trace *rejects* time-major packing,
   reversed history, a missing joint remap, and a flipped gravity sign. Without these, a
   passing parity test proves nothing. If any of them starts passing, the trace has stopped

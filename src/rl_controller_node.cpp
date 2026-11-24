@@ -32,6 +32,22 @@ RlControllerNode::RlControllerNode()
     get_logger(), "policy OK: run '%s', %d-dim observation (%d x H%d), CPU execution",
     policy_->run_path().c_str(), policy::kObsDim, policy::kFrameDim,
     policy::kHistoryLength);
+  RCLCPP_INFO(
+    get_logger(), "command envelope: vx [%.1f, %.1f] m/s, vy [%.1f, %.1f] m/s, "
+    "wz [%.1f, %.1f] rad/s",
+    policy::kCommandLower[0], policy::kCommandUpper[0],
+    policy::kCommandLower[1], policy::kCommandUpper[1],
+    policy::kCommandLower[2], policy::kCommandUpper[2]);
+  if (policy_->run_path() != policy::kTrainedRunPath) {
+    // Everything else in the contract was just validated against the ONNX metadata. The
+    // command ranges are not in the metadata, so this is the only signal there is.
+    RCLCPP_WARN(
+      get_logger(),
+      "this build's command envelope was mirrored from run '%s', not '%s'. The ONNX "
+      "metadata does not carry command ranges, so they cannot be checked: confirm the "
+      "envelope above against the run's params/env.yaml before driving.",
+      std::string(policy::kTrainedRunPath).c_str(), policy_->run_path().c_str());
+  }
 
   ControllerFsm::Config fsm_config;
   fsm_config.stand_segment_s = get_parameter("stand_segment_s").as_double();
@@ -151,7 +167,7 @@ std::string RlControllerNode::resolvePolicyPath() const
   auto path = get_parameter("policy_path").as_string();
   if (path.empty()) {
     path = ament_index_cpp::get_package_share_directory("go2_rl_velocity") +
-      "/config/policy/rugged-v2.onnx";
+      "/config/policy/latest.onnx";
   }
   if (!std::filesystem::exists(path)) {
     throw std::runtime_error("policy file does not exist: " + path);

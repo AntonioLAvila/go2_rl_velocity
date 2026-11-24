@@ -101,6 +101,34 @@ inline bool clampToJointLimits(std::array<float, policy::kNumJoints> & target)
   return clamped;
 }
 
+/// Map a stick deflection in [-1, 1] onto one axis of the command envelope.
+///
+/// Full deflection reaches the envelope's edge in *that direction*, so on an asymmetric
+/// axis the two halves of the stick have different gains: vx is 3.0 m/s at full forward
+/// and 1.0 m/s at full back. Scaling both halves by the larger bound and clamping instead
+/// would put the whole reverse range in the first third of the stick's travel.
+inline float stickToCommand(double stick, int axis)
+{
+  if (!std::isfinite(stick)) {
+    return 0.0F;
+  }
+  const double s = std::clamp(stick, -1.0, 1.0);
+  return static_cast<float>(
+    s >= 0.0 ? s * policy::kCommandUpper[axis] : -s * policy::kCommandLower[axis]);
+}
+
+/// Clamp one axis of a velocity command to the envelope the policy trained on. A
+/// non-finite request becomes zero: "stop" is the only safe reading of a garbage command.
+inline float clampCommand(float value, int axis)
+{
+  if (!std::isfinite(value)) {
+    return 0.0F;
+  }
+  return std::clamp(
+    value, static_cast<float>(policy::kCommandLower[axis]),
+    static_cast<float>(policy::kCommandUpper[axis]));
+}
+
 }  // namespace go2_rl_velocity
 
 #endif  // GO2_RL_VELOCITY__STATE_CONVERSION_HPP_

@@ -162,13 +162,16 @@ if(BUILD_TESTING)
   ament_add_gtest(test_unitree_remote test/test_unitree_remote.cpp)
   target_link_libraries(test_unitree_remote go2_rl_policy)
 
+  ament_add_gtest(test_command_envelope test/test_command_envelope.cpp)
+  target_link_libraries(test_command_envelope go2_rl_policy)
+
   # Parity against a trace generated from the training repo's own observation packer.
   # Paths are baked in so the test needs no ROS environment.
   ament_add_gtest(test_policy_parity test/test_policy_parity.cpp)
   target_link_libraries(test_policy_parity go2_rl_policy)
   target_compile_definitions(test_policy_parity PRIVATE
-    GO2_RL_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/rugged-v2.onnx"
-    GO2_RL_REFERENCE_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/reference/rugged_v2_reference.csv"
+    GO2_RL_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/latest.onnx"
+    GO2_RL_REFERENCE_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/reference/latest_reference.csv"
   )
 
   ##
@@ -190,7 +193,7 @@ if(BUILD_TESTING)
   target_compile_definitions(test_flat_policy_parity PRIVATE
     GO2_RL_FLAT_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/flat-feet-time-25.onnx"
     GO2_RL_FLAT_REFERENCE_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/reference/flat_feet_time_25_reference.csv"
-    GO2_RL_RUGGED_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/rugged-v2.onnx"
+    GO2_RL_RUGGED_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/latest.onnx"
   )
 
   # Needs unitree_go for the real LowCmd wire type, so it is gated the same way the node

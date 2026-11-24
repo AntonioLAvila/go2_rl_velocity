@@ -12,7 +12,7 @@
 go2_rl_velocity:
   ros__parameters:
     # Empty means the ONNX installed with the package
-    # (share/go2_rl_velocity/config/policy/rugged-v2.onnx).
+    # (share/go2_rl_velocity/config/policy/latest.onnx).
     policy_path: ""
 
     # Inferences run at startup to fault in pages and grow the arena before the robot

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the reference trace that test_flat_policy_parity replays.
 
-    /home/antonio/python_venvs/general/bin/python scripts/gen_flat_reference_trace.py \
-        --repo /home/antonio/GitHub/quadruped_walking
+    REPO=/home/antonio/GitHub/quadruped_walking
+    $REPO/.venv/bin/python scripts/gen_flat_reference_trace.py --repo $REPO
 
 Run this on a workstation that has the training repo and its venv -- never on the robot.
 Commit the resulting CSV; it is the contract between the trained policy and this package.

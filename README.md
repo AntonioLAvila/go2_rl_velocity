@@ -16,7 +16,7 @@ share no policy code by design.
 | control | PD position, motor boards close the loop | **direct torque** |
 | rate | 50 Hz | **200 Hz** |
 | observation | 225 = 45 × 5 frames of history | **45, single frame** |
-| command envelope | `vx ±2.0`, `vy ±1.0`, `wz ±1.5` | **`±1.5`, `±0.8`, `±1.2`** |
+| command envelope | `vx −1.0…+3.0`, `vy ±0.5`, `wz ±1.0` | **`±1.5`, `±0.8`, `±1.2`** |
 | launch file | `go2_rl_velocity.launch.py` | `go2_rl_flat.launch.py` |
 
 The rugged controller is the safer of the two — see *Flat-ground controller* below before
@@ -105,7 +105,9 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.5}}'
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | in, optional |
 | `~/status` | `std_msgs/msg/String` | out, 2 Hz |
 
-Command limits: `vx ±2.0 m/s`, `vy ±1.0 m/s`, `wz ±1.5 rad/s`.
+Command limits: `vx −1.0…+3.0 m/s`, `vy ±0.5 m/s`, `wz ±1.0 rad/s`. The forward and reverse
+limits differ, so the left stick reaches 3.0 m/s at full forward and 1.0 m/s at full back,
+and a `/cmd_vel` outside the range is clamped to the nearer edge.
 
 The flat controller is the same in every respect above, with `go2_rl_flat.launch.py`, node
 name `go2_rl_flat`, and its own command limits (`±1.5 / ±0.8 / ±1.2`). Only run one of the
@@ -128,8 +130,8 @@ Do this in order. Steps 1–3 need the robot on a stand with its feet clear of t
 6. **E-stop.** `L2+B` — confirm immediate soft collapse. Then confirm the staleness
    watchdog by killing the bridge; the controller must fall back to `DAMPING`.
 7. **Ground test.** Low speed first (`vx ≤ 0.5`), flat ground, safety handle attached.
-   Only work up toward 2.0 m/s once the tilt watchdog and e-stop have both been seen to
-   fire cleanly.
+   Only work up toward 3.0 m/s once the tilt watchdog and e-stop have both been seen to
+   fire cleanly — full forward stick is the full 3.0, so feed it in gradually.
 
 ## Configuration
 
@@ -142,31 +144,39 @@ Policy-contract values (observation layout, action scale, gains, joint order, co
 bounds) are **not** parameters. They live in `policy_constants.hpp` — one per controller,
 `include/go2_rl_velocity/` and `include/go2_rl_velocity/flat/` — because they must match
 the trained checkpoint exactly. The rugged node cross-checks them against the ONNX metadata
-at startup and refuses to run on a mismatch. **The flat node cannot**: mjlab's exporter is
+at startup and refuses to run on a mismatch — all except the command envelope, which the
+metadata does not carry; the node logs the envelope it will enforce and warns if the
+checkpoint is not the run that envelope was taken from. **The flat node cannot**: mjlab's exporter is
 hard-wired to position control and writes flat checkpoints with an empty metadata map, so
 the flat node validates only the graph's 45-in/12-out shape and warns about it at startup.
 
 ## Swapping in a retrained policy
 
 ```bash
+REPO=/home/antonio/GitHub/quadruped_walking     # the training repo, with its uv .venv
+
 # rugged
-cp <run>/<run>.onnx config/policy/rugged-v2.onnx
-/home/antonio/python_venvs/general/bin/python scripts/gen_reference_trace.py \
-  --repo /home/antonio/GitHub/quadruped_walking
+cp <run>/<run>.onnx config/policy/latest.onnx
+$REPO/.venv/bin/python scripts/gen_reference_trace.py --repo $REPO
 
 # flat
 cp <run>/<run>.onnx config/policy/flat-feet-time-25.onnx
-/home/antonio/python_venvs/general/bin/python scripts/gen_flat_reference_trace.py \
-  --repo /home/antonio/GitHub/quadruped_walking --run-dir <run>
+$REPO/.venv/bin/python scripts/gen_flat_reference_trace.py --repo $REPO --run-dir <run>
 
 colcon test --packages-select go2_rl_velocity
 ```
 
+The rugged generator prints the run name and command envelope it read from the run's frozen
+config; `kTrainedRunPath`, `kCommandLower` and `kCommandUpper` in `policy_constants.hpp`
+must match them, and the tests fail if they do not. The generators must run on the machine
+that has the training repo — `CLAUDE.md` has the copy-over recipe for when that is not
+this one.
+
 Regenerating the reference trace is not optional — the tests are meaningless against a
 stale one, and for the flat policy the trace is the *only* contract guard there is. If a
 rugged retrain changed the observation terms or the history length, the node will refuse to
-start with an explicit contract error; a flat retrain that changed them would only be
-caught by the regenerated trace.
+start with an explicit contract error; a changed command envelope, or a flat retrain that
+changed anything, would only be caught by the regenerated trace.
 
 ## Flat-ground controller
 

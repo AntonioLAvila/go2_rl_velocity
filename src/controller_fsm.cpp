@@ -220,15 +220,13 @@ void ControllerFsm::updateVelocityCommand(const RobotObservation & obs, bool war
   std::array<float, 3> target{};
   if (!warming_up) {
     if (config_.use_joystick_command) {
-      // Sticks map to the full command envelope. Signs are configurable because the
-      // remote's convention is undocumented -- verify with remote_debug before driving.
+      // Sticks map to the full command envelope, which is asymmetric in vx -- see
+      // stickToCommand. Signs are configurable because the remote's convention is
+      // undocumented -- verify with remote_debug before driving.
       target = {
-        static_cast<float>(obs.remote.ly * config_.joystick_sign[0] *
-        policy::kCommandBounds[0]),
-        static_cast<float>(obs.remote.lx * config_.joystick_sign[1] *
-        policy::kCommandBounds[1]),
-        static_cast<float>(obs.remote.rx * config_.joystick_sign[2] *
-        policy::kCommandBounds[2]),
+        stickToCommand(obs.remote.ly * config_.joystick_sign[0], 0),
+        stickToCommand(obs.remote.lx * config_.joystick_sign[1], 1),
+        stickToCommand(obs.remote.rx * config_.joystick_sign[2], 2),
       };
     } else if (obs.external_command_fresh) {
       target = obs.external_command;
@@ -238,11 +236,9 @@ void ControllerFsm::updateVelocityCommand(const RobotObservation & obs, bool war
   }
 
   for (int i = 0; i < 3; ++i) {
-    const auto bound = static_cast<float>(policy::kCommandBounds[i]);
-    target[i] = std::clamp(target[i], -bound, bound);
-    if (!std::isfinite(target[i])) {
-      target[i] = 0.0F;
-    }
+    // /cmd_vel is clamped rather than rejected: a planner asking for more than the
+    // policy has gets the most the policy has.
+    target[i] = clampCommand(target[i], i);
 
     // Slew limit, so a flicked stick cannot ask for a step change in velocity.
     const auto max_delta =
