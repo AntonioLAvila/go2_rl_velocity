@@ -210,15 +210,6 @@ inline constexpr std::array<double, 3> kCommandBounds{{1.5, 0.8, 1.2}};
 /// because the flat policy has no experience past this angle.
 inline constexpr double kTiltLimit = -0.7071;
 
-/// Unitree MotorCmd.mode for servo (position/velocity/torque) control on the Go2.
-inline constexpr std::uint8_t kMotorModeServo = 0x01;
-inline constexpr std::uint8_t kMotorModeIdle = 0x00;
-
-/// LowCmd header bytes and level flag, as the Go2 expects them.
-inline constexpr std::uint8_t kLowCmdHead0 = 0xFE;
-inline constexpr std::uint8_t kLowCmdHead1 = 0xEF;
-inline constexpr std::uint8_t kLowCmdLevelFlag = 0xFF;
-
 }  // namespace go2_rl_velocity::flat
 
 #endif  // GO2_RL_VELOCITY__FLAT__POLICY_CONSTANTS_HPP_

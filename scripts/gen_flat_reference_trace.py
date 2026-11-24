@@ -207,7 +207,7 @@ def main() -> None:
                         help="path to the quadruped_walking training repo")
     parser.add_argument("--onnx", type=Path,
                         default=Path(__file__).resolve().parents[1] /
-                        "config/policy/flat-feet-time-25.onnx")
+                        "config/policy/flat-v0.onnx")
     parser.add_argument("--run-dir", type=Path, default=None,
                         help="training run directory holding params/env.yaml. Defaults to "
                              "logs/rsl_rl/go2_velocity/feet-time-25 inside --repo.")

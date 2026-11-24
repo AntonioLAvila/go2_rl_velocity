@@ -19,12 +19,24 @@
 #include "go2_rl_velocity/controller_fsm.hpp"
 #include "go2_rl_velocity/lowcmd_builder.hpp"
 #include "go2_rl_velocity/policy_constants.hpp"
+#include "go2_rl_velocity/state_conversion.hpp"
 
 namespace
 {
 
 namespace policy = go2_rl_velocity::policy;
+using go2_rl_velocity::LowCmdJoints;
 using go2_rl_velocity::MotorCommand;
+
+/// The exact remap the rugged node applies before handing the command to fillLowCmd.
+LowCmdJoints toLowCmdJoints(const MotorCommand & command)
+{
+  LowCmdJoints joints;
+  joints.q = go2_rl_velocity::policyToUnitree(command.joint_target);
+  joints.kp = go2_rl_velocity::policyToUnitree(command.kp);
+  joints.kd = go2_rl_velocity::policyToUnitree(command.kd);
+  return joints;
+}
 
 // --- Independent oracle: Unitree's own hand-packed wire struct and CRC algorithm,
 // reproduced verbatim from motor_crc.h/motor_crc.cpp. Deliberately not shared code with
@@ -134,11 +146,11 @@ TEST(LowCmdBuilder, FixStandTargetProducesCorrectHeaderAndCrc)
   }
 
   unitree_go::msg::LowCmd cmd{};
-  go2_rl_velocity::fillLowCmd(cmd, command);
+  go2_rl_velocity::fillLowCmd(cmd, toLowCmdJoints(command));
 
-  EXPECT_EQ(cmd.head[0], policy::kLowCmdHead0);
-  EXPECT_EQ(cmd.head[1], policy::kLowCmdHead1);
-  EXPECT_EQ(cmd.level_flag, policy::kLowCmdLevelFlag);
+  EXPECT_EQ(cmd.head[0], go2_rl_velocity::kLowCmdHead0);
+  EXPECT_EQ(cmd.head[1], go2_rl_velocity::kLowCmdHead1);
+  EXPECT_EQ(cmd.level_flag, go2_rl_velocity::kLowCmdLevelFlag);
   EXPECT_EQ(cmd.gpio, 0);
 
   // The independent, from-scratch oracle must agree with the real compiled output.
@@ -158,7 +170,7 @@ TEST(LowCmdBuilder, ActiveSlotsCarryStandGainsInUnitreeOrder)
   }
 
   unitree_go::msg::LowCmd cmd{};
-  go2_rl_velocity::fillLowCmd(cmd, command);
+  go2_rl_velocity::fillLowCmd(cmd, toLowCmdJoints(command));
 
   // kStandKp/kStandKd/kDefaultJointPos all repeat the same [hip, thigh, calf] triplet for
   // every leg, so this holds regardless of which leg is which -- it does NOT exercise the
@@ -169,7 +181,7 @@ TEST(LowCmdBuilder, ActiveSlotsCarryStandGainsInUnitreeOrder)
   constexpr std::array<float, 3> kExpectedKd{5.0F, 4.0F, 4.0F};
   for (int i = 0; i < 12; ++i) {
     const auto & motor = cmd.motor_cmd[i];
-    EXPECT_EQ(motor.mode, policy::kMotorModeServo) << "slot " << i;
+    EXPECT_EQ(motor.mode, go2_rl_velocity::kMotorModeServo) << "slot " << i;
     EXPECT_NEAR(motor.q, kExpectedQ[i % 3], 1e-5F) << "slot " << i;
     EXPECT_FLOAT_EQ(motor.dq, 0.0F) << "slot " << i;
     EXPECT_FLOAT_EQ(motor.tau, 0.0F) << "slot " << i;
@@ -183,17 +195,38 @@ TEST(LowCmdBuilder, IdleSlotsUseServoModeWithStopSentinels)
   MotorCommand command{};  // All zero is fine; only slots 12-19 are checked here.
 
   unitree_go::msg::LowCmd cmd{};
-  go2_rl_velocity::fillLowCmd(cmd, command);
+  go2_rl_velocity::fillLowCmd(cmd, toLowCmdJoints(command));
 
   for (int i = 12; i < 20; ++i) {
     const auto & motor = cmd.motor_cmd[i];
-    EXPECT_EQ(motor.mode, policy::kMotorModeServo) << "slot " << i;
-    EXPECT_FLOAT_EQ(motor.q, policy::kPosStopF) << "slot " << i;
-    EXPECT_FLOAT_EQ(motor.dq, policy::kVelStopF) << "slot " << i;
+    EXPECT_EQ(motor.mode, go2_rl_velocity::kMotorModeServo) << "slot " << i;
+    EXPECT_FLOAT_EQ(motor.q, go2_rl_velocity::kPosStopF) << "slot " << i;
+    EXPECT_FLOAT_EQ(motor.dq, go2_rl_velocity::kVelStopF) << "slot " << i;
     EXPECT_FLOAT_EQ(motor.kp, 0.0F) << "slot " << i;
     EXPECT_FLOAT_EQ(motor.kd, 0.0F) << "slot " << i;
     EXPECT_FLOAT_EQ(motor.tau, 0.0F) << "slot " << i;
   }
+}
+
+TEST(LowCmdBuilder, CarriesFeedForwardTorqueOnActiveSlots)
+{
+  // The flat controller drives through tau with kp = 0, so a builder that dropped tau
+  // would leave that policy commanding nothing at all while still looking healthy.
+  LowCmdJoints joints;
+  for (std::size_t i = 0; i < go2_rl_velocity::kGo2Joints; ++i) {
+    joints.tau[i] = static_cast<float>(i) + 0.5F;
+    joints.kd[i] = 2.0F;
+  }
+
+  unitree_go::msg::LowCmd cmd{};
+  go2_rl_velocity::fillLowCmd(cmd, joints);
+
+  for (std::size_t i = 0; i < go2_rl_velocity::kGo2Joints; ++i) {
+    EXPECT_FLOAT_EQ(cmd.motor_cmd[i].tau, static_cast<float>(i) + 0.5F) << "slot " << i;
+    EXPECT_FLOAT_EQ(cmd.motor_cmd[i].kp, 0.0F) << "slot " << i;
+    EXPECT_FLOAT_EQ(cmd.motor_cmd[i].kd, 2.0F) << "slot " << i;
+  }
+  EXPECT_EQ(cmd.crc, oracleCrc(cmd));
 }
 
 TEST(LowCmdBuilder, RemapsEachJointToItsOwnUnitreeSlot)
@@ -209,7 +242,7 @@ TEST(LowCmdBuilder, RemapsEachJointToItsOwnUnitreeSlot)
   }
 
   unitree_go::msg::LowCmd cmd{};
-  go2_rl_velocity::fillLowCmd(cmd, command);
+  go2_rl_velocity::fillLowCmd(cmd, toLowCmdJoints(command));
 
   for (int policy_index = 0; policy_index < policy::kNumJoints; ++policy_index) {
     const int unitree_slot = policy::kPolicyToUnitree[policy_index];

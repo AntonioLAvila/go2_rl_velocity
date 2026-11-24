@@ -23,7 +23,7 @@ command, which is what makes them deployable without an elevation map. That repo
 | commands | `vx -1.0..+3.0`, `vy +/-0.5`, `wz +/-1.0` | **`+/-1.5`, `+/-0.8`, `+/-1.2`** |
 | tilt limit | `gravity.z > -0.6` (53 deg) | **`> -0.7071` (45 deg)** |
 | ONNX metadata | validated at startup (all but the command envelope) | **absent — shape check only** |
-| checkpoint | `config/policy/latest.onnx` | `config/policy/flat-feet-time-25.onnx` |
+| checkpoint | `config/policy/latest.onnx` | `config/policy/flat-v0.onnx` |
 | from | `logs/rsl_rl/go2_rugged/2026-11-13_14-08-41_rugged_3ms/` | `logs/rsl_rl/go2_velocity/feet-time-25/` |
 | namespace | `go2_rl_velocity::policy` | `go2_rl_velocity::flat` |
 | library | `go2_rl_policy` | `go2_rl_flat_policy` |
@@ -265,9 +265,10 @@ policy thread at `step_dt`):
 | `policy_runner.*` | ORT session, contract validation, warm-up. |
 | `state_conversion.hpp` | Quaternion→gravity, joint remap, action→target, limit clamp. |
 | `controller_fsm.*` | States, transitions, watchdogs, command shaping. |
-| `rl_controller_node.*` | ROS wiring, the two timers, LowCmd assembly + CRC. |
+| `rl_controller_node.*` | ROS wiring, the two timers. |
 | `unitree_remote.*` | Wireless remote decode, edge-triggered chords. |
 | `crc32.*` | Unitree's MPEG-2 CRC. The Go2 silently drops LowCmd without it. |
+| `lowcmd_builder.*` | LowCmd assembly + CRC. **Shared by both nodes.** |
 
 `flat/` mirrors the first six of those, in `namespace go2_rl_velocity::flat`, with three
 differences: `observation.hpp` is a bare frame struct rather than a history buffer,
@@ -276,9 +277,16 @@ instead of `actionToTarget`, and `controller_fsm.cpp` lives in the *library* rat
 node target so the handover is testable.
 
 `go2_rl_policy` and `go2_rl_flat_policy` have no ROS and no `unitree_go` dependency. Keep
-them that way; it is what makes the parity tests runnable anywhere. `go2_rl_common`
-(`crc32`, `unitree_remote`) is the only code both controllers share — everything else is
-duplicated deliberately.
+them that way; it is what makes the parity tests runnable anywhere.
+
+Both controllers share `go2_rl_common` (`crc32`, `unitree_remote`) and `lowcmd_builder`;
+everything policy-specific is duplicated deliberately. `lowcmd_builder` takes joint arrays
+already in **Unitree order** — each node applies its own remap first — so the joint map
+stays per-policy while the wire format does not. It compiles into the two node targets
+rather than into `go2_rl_common`, which must stay free of `unitree_go` so the policy
+libraries still build without the bridge. It was duplicated once, and the copies drifted:
+the flat node kept idling slots 12–19 with mode `0x00` for a week after the rugged node was
+fixed, which the Go2 answers by discarding *every* command.
 
 ## FSM
 
@@ -356,10 +364,11 @@ joint-target clamp, which has no meaning without a position target:
   YAML rather than rebuilding.
 - LowCmd carries 20 motor slots; the Go2 uses 12. Slots 12–19 are explicitly idled every
   message.
-- The CRC covers every word except its own. `static_assert`s in `rl_controller_node.cpp`
-  and `flat/flat_controller_node.cpp` pin `sizeof(LowCmd) == 812` with `crc` at offset 808;
-  a different `unitree_go` version will fail the build rather than emit commands the robot
-  silently discards.
+- The CRC covers every word except its own. `static_assert`s in `lowcmd_builder.cpp` pin
+  `sizeof(LowCmd) == 812` with `crc` at offset 808; a different `unitree_go` version will
+  fail the build rather than emit commands the robot silently discards. `fillLowCmd` also
+  `memset`s the message first — the generated constructor leaves padding uninitialised, and
+  the CRC is computed over raw struct memory.
 - Both YAMLs are keyed by node name, not `/**`. Passing one to the wrong launch file then
   does nothing instead of something subtle.
 - **Only run one controller at a time.** Both publish `/lowcmd`; nothing in either node

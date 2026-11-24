@@ -51,12 +51,9 @@ struct RobotObservation
 /// Joint-space command, in policy joint order. The node remaps to Unitree motor order.
 ///
 /// Unlike the rugged controller's MotorCommand this carries a feed-forward torque. The
-/// Go2's motor board computes
-///
-///     tau_total = kp * (joint_target - q) + kd * (0 - qd) + tau
-///
-/// so all four fields are live at once, and the two authorities can be blended smoothly
-/// instead of switched. That is what makes the position-to-torque handover safe.
+/// motor board computes `kp*(joint_target - q) + kd*(0 - qd) + tau`, so all four fields
+/// are live at once and the two authorities blend smoothly instead of switching -- which
+/// is what makes the position-to-torque handover safe.
 struct MotorCommand
 {
   std::array<float, kNumJoints> joint_target{};
@@ -68,20 +65,17 @@ struct MotorCommand
 
 /// The operator-facing state machine for the flat-ground torque policy.
 ///
-/// Mirrors the structure of the rugged controller's ControllerFsm -- same four states,
-/// same remote chords, same scripted stand -- and differs in exactly the places the
-/// control mode forces it to:
+/// Mirrors the rugged controller's ControllerFsm -- same four states, same remote chords,
+/// same scripted stand -- differing only where the control mode forces it to:
 ///
 ///   * RL commands torque with kp = 0, so there is no position target to clamp. Joint
-///     protection moves from clamping the target to watching the measured position.
-///   * The handover blends the stand's position authority out and the policy's torque
-///     authority in, rather than blending one set of PD gains into another.
+///     protection watches the measured position instead.
+///   * The handover blends the stand's position authority out and the policy's torque in.
 ///   * kd does not go to zero in RL: it reproduces the passive joint damping the policy
 ///     was trained with. See kPolicyKd in policy_constants.hpp.
 ///
-/// step() is called at the policy rate (200 Hz). The command it produces is *held* and
-/// republished by the node at a higher rate, which is the same zero-order hold that
-/// mjlab's decimation applies in training.
+/// step() is called at the policy rate (200 Hz); the node holds and republishes its
+/// command at a higher rate, the same zero-order hold mjlab's decimation applies.
 class ControllerFsm
 {
 public:

@@ -273,8 +273,7 @@ void ControllerFsm::stepRl(const RobotObservation & obs, double now_s)
   if (!policy_engaged_) {
     // Hand authority over from the stand's position loop to the policy's torque. kp goes
     // to zero; kd goes to the passive damping the policy trained with, NOT to zero. The
-    // pose is held at the default throughout, which is exactly where the completed stand
-    // left the robot.
+    // pose is held at the default throughout, where the completed stand left the robot.
     const float alpha = smoothStep(elapsed / config_.gain_ramp_s);
     std::array<double, kNumJoints> kp{};
     std::array<double, kNumJoints> kd{};
@@ -301,9 +300,8 @@ void ControllerFsm::stepRl(const RobotObservation & obs, double now_s)
   engaged_kd.fill(config_.passive_damping_kd);
   setGains(kPolicyKp, engaged_kd);
   // kp is zero from here on, so the target no longer reaches the motors. Keep writing the
-  // default pose anyway: it costs nothing, it keeps the published command readable, and
-  // it means a stray non-zero kp would pull towards the stance rather than somewhere
-  // arbitrary.
+  // default pose anyway, so a stray non-zero kp would pull towards the stance rather than
+  // somewhere arbitrary.
   for (int i = 0; i < kNumJoints; ++i) {
     command_.joint_target[i] = static_cast<float>(kDefaultJointPos[i]);
   }
@@ -339,10 +337,9 @@ void ControllerFsm::stepRl(const RobotObservation & obs, double now_s)
     }
   }
 
-  // Joint protection. A position policy can be held inside the limits by clamping its
-  // target; a torque policy cannot, so the excursion is detected after the fact on the
-  // measured position. mjlab penalised the policy for leaving this band in training, so
-  // sustained excursion means it is fighting the hardware, not tracking a command.
+  // A position policy can be held inside its limits by clamping the target; a torque
+  // policy cannot, so excursion is detected after the fact on the measured position.
+  // Sustained excursion means it is fighting the hardware, not tracking a command.
   if (outsideSoftJointLimits(obs.joint_pos)) {
     if (++joint_excursion_streak_ >= config_.joint_excursion_fault_steps) {
       fault("a joint sat outside its soft limit for too many consecutive steps", now_s);
@@ -355,11 +352,8 @@ void ControllerFsm::stepRl(const RobotObservation & obs, double now_s)
   auto torque = actionToTorque(action);
 
   // Ramp the policy's authority in, then apply the operator's global derate. Both are
-  // multiplicative on the raw torque and applied before saturation, so the clamp below
-  // sees -- and the watchdog judges -- the torque actually being sent, not the one the
-  // policy asked for. A derated run therefore saturates less often and the watchdog is
-  // correspondingly quieter, which is the right trade: with less authority there is less
-  // to protect against.
+  // applied before saturation, so the clamp below sees -- and the watchdog judges -- the
+  // torque actually being sent, not the one the policy asked for.
   const auto ramp = config_.torque_ramp_s > 0.0 ?
     smoothStep(since_engaged / config_.torque_ramp_s) : 1.0F;
   const auto gain = ramp * static_cast<float>(std::clamp(config_.torque_scale, 0.0, 1.0));

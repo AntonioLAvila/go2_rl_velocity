@@ -111,6 +111,7 @@ if(node_deps_found)
   add_executable(go2_rl_flat_node
     src/flat/main.cpp
     src/flat/flat_controller_node.cpp
+    src/lowcmd_builder.cpp
   )
   target_link_libraries(go2_rl_flat_node PRIVATE
     go2_rl_flat_policy
@@ -183,7 +184,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_flat_controller_fsm test/test_flat_controller_fsm.cpp)
   target_link_libraries(test_flat_controller_fsm go2_rl_flat_policy)
   target_compile_definitions(test_flat_controller_fsm PRIVATE
-    GO2_RL_FLAT_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/flat-feet-time-25.onnx"
+    GO2_RL_FLAT_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/flat-v0.onnx"
   )
 
   # The flat exports carry no ONNX metadata, so this is not merely the primary guard on
@@ -191,7 +192,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_flat_policy_parity test/test_flat_policy_parity.cpp)
   target_link_libraries(test_flat_policy_parity go2_rl_flat_policy)
   target_compile_definitions(test_flat_policy_parity PRIVATE
-    GO2_RL_FLAT_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/flat-feet-time-25.onnx"
+    GO2_RL_FLAT_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/flat-v0.onnx"
     GO2_RL_FLAT_REFERENCE_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/reference/flat_feet_time_25_reference.csv"
     GO2_RL_RUGGED_POLICY_ONNX="${CMAKE_CURRENT_SOURCE_DIR}/config/policy/latest.onnx"
   )

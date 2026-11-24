@@ -180,25 +180,6 @@ inline constexpr std::string_view kTrainedRunPath{"2026-11-13_14-08-41_rugged_3m
 inline constexpr std::array<double, 3> kCommandLower{{-1.0, -0.5, -1.0}};
 inline constexpr std::array<double, 3> kCommandUpper{{3.0, 0.5, 1.0}};
 
-/// Unitree MotorCmd.mode for servo (position/velocity/torque) control on the Go2.
-inline constexpr std::uint8_t kMotorModeServo = 0x01;
-
-/// Sentinel q/dq values Unitree's own examples use on unused motor slots (12-19) --
-/// "no target", not zero. Slots 12-19 must still carry kMotorModeServo with zero gains;
-/// go2_stand_example (~/unitree_ros2/example/src/src/go2/go2_stand_example.cpp) leaves
-/// mode 0x01 on all 20 slots and never changes it. Setting mode 0x00 there instead (as
-/// this node previously did) made the Go2 silently ignore the entire command, not just
-/// the absent motors -- confirmed 2026-08-01 by diffing against that example, which
-/// stood the robot under otherwise-identical conditions while this node's LowCmd did
-/// nothing. See ~/ros2_ws/CLAUDE.md, "The open blocker".
-inline constexpr float kPosStopF = 2.146E+9F;
-inline constexpr float kVelStopF = 16000.0F;
-
-/// LowCmd header bytes and level flag, as the Go2 expects them.
-inline constexpr std::uint8_t kLowCmdHead0 = 0xFE;
-inline constexpr std::uint8_t kLowCmdHead1 = 0xEF;
-inline constexpr std::uint8_t kLowCmdLevelFlag = 0xFF;
-
 }  // namespace go2_rl_velocity::policy
 
 #endif  // GO2_RL_VELOCITY__POLICY_CONSTANTS_HPP_
